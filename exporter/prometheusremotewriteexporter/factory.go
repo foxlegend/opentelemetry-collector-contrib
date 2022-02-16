@@ -107,5 +107,12 @@ func createDefaultConfig() config.Exporter {
 			QueueSize:    10000,
 			NumConsumers: 5,
 		},
+		MultiTenancy: MultiTenancy{
+			Enabled:       false,
+			Header:        "",
+			QueryParam:    "",
+			FromLabel:     "tenant",
+			DefaultTenant: "default",
+		},
 	}
 }

@@ -50,6 +50,7 @@ type prwExporter struct {
 	wg              *sync.WaitGroup
 	closeChan       chan struct{}
 	concurrency     int
+	multiTenancy    MultiTenancy
 	userAgentHeader string
 	clientSettings  *confighttp.HTTPClientSettings
 	settings        component.TelemetrySettings
@@ -79,6 +80,7 @@ func newPRWExporter(cfg *Config, set component.ExporterCreateSettings) (*prwExpo
 		closeChan:       make(chan struct{}),
 		userAgentHeader: userAgentHeader,
 		concurrency:     cfg.RemoteWriteQueue.NumConsumers,
+		multiTenancy:    cfg.MultiTenancy,
 		clientSettings:  &cfg.HTTPClientSettings,
 		settings:        set.TelemetrySettings,
 	}
@@ -171,8 +173,12 @@ func validateAndSanitizeExternalLabels(cfg *Config) (map[string]string, error) {
 }
 
 func (prwe *prwExporter) handleExport(ctx context.Context, tsMap map[string]*prompb.TimeSeries) error {
+	var tenantKey = noTenant
+	if prwe.multiTenancy.Enabled {
+		tenantKey = prwe.multiTenancy.FromLabel
+	}
 	// Calls the helper function to convert and batch the TsMap to the desired format
-	requests, err := batchTimeSeries(tsMap, maxBatchByteSize)
+	requests, err := batchTimeSeries(tsMap, maxBatchByteSize, tenantKey)
 	if err != nil {
 		return err
 	}
@@ -190,10 +196,22 @@ func (prwe *prwExporter) handleExport(ctx context.Context, tsMap map[string]*pro
 }
 
 // export sends a Snappy-compressed WriteRequest containing TimeSeries to a remote write endpoint in order
-func (prwe *prwExporter) export(ctx context.Context, requests []*prompb.WriteRequest) error {
-	input := make(chan *prompb.WriteRequest, len(requests))
-	for _, request := range requests {
-		input <- request
+func (prwe *prwExporter) export(ctx context.Context, requests map[string][]*prompb.WriteRequest) error {
+	chanLength := 0
+	for _, tenantRequests := range requests {
+		chanLength += len(tenantRequests)
+	}
+	input := make(chan struct {
+		string
+		*prompb.WriteRequest
+	}, chanLength)
+	for tenant, tenantRequests := range requests {
+		for _, request := range tenantRequests {
+			input <- struct {
+				string
+				*prompb.WriteRequest
+			}{tenant, request}
+		}
 	}
 	close(input)
 
@@ -218,7 +236,7 @@ func (prwe *prwExporter) export(ctx context.Context, requests []*prompb.WriteReq
 					if !ok {
 						return
 					}
-					if errExecute := prwe.execute(ctx, request); errExecute != nil {
+					if errExecute := prwe.execute(ctx, request.string, request.WriteRequest); errExecute != nil {
 						mu.Lock()
 						errs = multierr.Append(errs, consumererror.NewPermanent(errExecute))
 						mu.Unlock()
@@ -232,7 +250,7 @@ func (prwe *prwExporter) export(ctx context.Context, requests []*prompb.WriteReq
 	return errs
 }
 
-func (prwe *prwExporter) execute(ctx context.Context, writeReq *prompb.WriteRequest) error {
+func (prwe *prwExporter) execute(ctx context.Context, tenant string, writeReq *prompb.WriteRequest) error {
 	// Uses proto.Marshal to convert the WriteRequest into bytes array
 	data, err := proto.Marshal(writeReq)
 	if err != nil {
@@ -241,8 +259,18 @@ func (prwe *prwExporter) execute(ctx context.Context, writeReq *prompb.WriteRequ
 	buf := make([]byte, len(data), cap(data))
 	compressedData := snappy.Encode(buf, data)
 
+	if prwe.multiTenancy.Enabled && tenant == noTenant {
+		tenant = prwe.multiTenancy.DefaultTenant
+	}
+
+	// Enable multitenancy at query level (eg. Thanos)
+	endpointQueryUrl := prwe.endpointURL
+	if prwe.multiTenancy.Enabled && prwe.multiTenancy.QueryParam != "" {
+		endpointQueryUrl.Query().Set(prwe.multiTenancy.QueryParam, tenant)
+	}
+
 	// Create the HTTP POST request to send to the endpoint
-	req, err := http.NewRequestWithContext(ctx, "POST", prwe.endpointURL.String(), bytes.NewReader(compressedData))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpointQueryUrl.String(), bytes.NewReader(compressedData))
 	if err != nil {
 		return consumererror.NewPermanent(err)
 	}
@@ -253,6 +281,9 @@ func (prwe *prwExporter) execute(ctx context.Context, writeReq *prompb.WriteRequ
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 	req.Header.Set("User-Agent", prwe.userAgentHeader)
+	if prwe.multiTenancy.Enabled && prwe.multiTenancy.Header != "" {
+		req.Header.Set(prwe.multiTenancy.Header, tenant)
+	}
 
 	resp, err := prwe.client.Do(req)
 	if err != nil {
