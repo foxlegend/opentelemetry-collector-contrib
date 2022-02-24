@@ -41,6 +41,12 @@ var (
 	label22 = "test_label22"
 	value22 = "test_value22"
 
+	tenantLabel   = "test_tenantLabel"
+	tenantValue11 = "test_tenantValue11"
+	tenantValue12 = "test_tenantValue12"
+	tenantValue21 = "test_tenantValue21"
+	tenantValue22 = "test_tenantValue22"
+
 	intVal1   int64 = 1
 	intVal2   int64 = 2
 	floatVal1       = 1.0
@@ -87,6 +93,29 @@ var (
 		validSummary:             getSummaryMetric(validSummary, lbs2, time2, floatVal2, uint64(intVal2), quantiles),
 		validIntGaugeDirty:       getIntGaugeMetric(validIntGaugeDirty, lbs1, intVal1, time1),
 		unmatchedBoundBucketHist: getHistogramMetric(unmatchedBoundBucketHist, pcommon.NewMap(), 0, 0, 0, []float64{0.1, 0.2, 0.3}, []uint64{1, 2}),
+	}
+
+	lbstenant11 = getAttributes(label21, value21, label22, value22, tenantLabel, tenantValue11)
+	lbstenant22 = getAttributes(label21, value21, label22, value22, tenantLabel, tenantValue22)
+
+	tenantMetrics11 = map[string]pdata.Metric{
+		validIntGauge:    getIntGaugeMetric(validIntGauge, lbstenant11, intVal1, time1),
+		validDoubleGauge: getDoubleGaugeMetric(validDoubleGauge, lbstenant11, floatVal1, time1),
+		validIntSum:      getIntSumMetric(validIntSum, lbstenant11, intVal1, time1),
+		suffixedCounter:  getIntSumMetric(suffixedCounter, lbstenant11, intVal1, time1),
+		validSum:         getSumMetric(validSum, lbstenant11, floatVal1, time1),
+		validHistogram:   getHistogramMetric(validHistogram, lbstenant11, time1, floatVal1, uint64(intVal1), bounds, buckets),
+		validSummary:     getSummaryMetric(validSummary, lbstenant11, time1, floatVal1, uint64(intVal1), quantiles),
+	}
+	tenantMetrics22 = map[string]pdata.Metric{
+		validIntGauge:            getIntGaugeMetric(validIntGauge, lbstenant22, intVal2, time2),
+		validDoubleGauge:         getDoubleGaugeMetric(validDoubleGauge, lbstenant22, floatVal2, time2),
+		validIntSum:              getIntSumMetric(validIntSum, lbstenant22, intVal2, time2),
+		validSum:                 getSumMetric(validSum, lbstenant22, floatVal2, time2),
+		validHistogram:           getHistogramMetric(validHistogram, lbstenant22, time2, floatVal2, uint64(intVal2), bounds, buckets),
+		validSummary:             getSummaryMetric(validSummary, lbstenant22, time2, floatVal2, uint64(intVal2), quantiles),
+		validIntGaugeDirty:       getIntGaugeMetric(validIntGaugeDirty, lbs1, intVal1, time1),
+		unmatchedBoundBucketHist: getHistogramMetric(unmatchedBoundBucketHist, pdata.NewAttributeMap(), 0, 0, 0, []float64{0.1, 0.2, 0.3}, []uint64{1, 2}),
 	}
 
 	empty = "empty"

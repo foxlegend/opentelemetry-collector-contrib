@@ -129,6 +129,7 @@ func Test_NewPRWExporter(t *testing.T) {
 			assert.NotNil(t, prwe.wg)
 			assert.NotNil(t, prwe.userAgentHeader)
 			assert.NotNil(t, prwe.clientSettings)
+			assert.NotNil(t, prwe.multiTenancy)
 		})
 	}
 }
@@ -646,6 +647,120 @@ func Test_PushMetrics(t *testing.T) {
 					assert.NoError(t, err)
 				})
 			}
+		})
+	}
+}
+
+func Test_exportWithMultiTenancy(t *testing.T) {
+	tenant11Batch := getMetricsFromMetricList(tenantMetrics11[validSum])
+	tenant22Batch := getMetricsFromMetricList(tenantMetrics22[validSum])
+	notenantBatch := getMetricsFromMetricList(validMetrics1[validSum])
+	multitenantBatch := getMetricsFromMetricList(tenantMetrics11[validSum], tenantMetrics22[validSum])
+	multitenantWithMissingTenantLabel := getMetricsFromMetricList(
+		tenantMetrics11[validSum],
+		tenantMetrics22[validSum],
+		validMetrics1[validSum],
+	)
+
+	checkFunc := func(t *testing.T, r *http.Request, multiTenancy bool, expectedTenants []string) {
+		assert.Equal(t, "0.1.0", r.Header.Get("x-prometheus-remote-write-version"))
+		assert.Equal(t, "snappy", r.Header.Get("content-encoding"))
+		assert.Equal(t, "opentelemetry-collector/1.0", r.Header.Get("User-Agent"))
+
+		if multiTenancy {
+			assert.Contains(t, expectedTenants, r.Header.Get("X-Scope-OrgId"))
+		} else {
+			assert.Empty(t, r.Header.Get("X-Scope-OrgId"))
+		}
+	}
+
+	tests := []struct {
+		name            string
+		md              *pdata.Metrics
+		multiTenancy    bool
+		expectedTenants []string
+	}{
+		{
+			name:            "multitenancy_disabled_case",
+			md:              &multitenantBatch,
+			multiTenancy:    false,
+			expectedTenants: nil,
+		},
+		{
+			name:            "multitenancy_single_tenant_case1",
+			md:              &tenant11Batch,
+			multiTenancy:    true,
+			expectedTenants: []string{tenantValue11},
+		},
+		{
+			name:            "multitenancy_single_tenant_case2",
+			md:              &tenant22Batch,
+			multiTenancy:    true,
+			expectedTenants: []string{tenantValue22},
+		},
+		{
+			name:            "multitenancy_multiple_tenants_case",
+			md:              &multitenantBatch,
+			multiTenancy:    true,
+			expectedTenants: []string{tenantValue11, tenantValue22},
+		},
+		{
+			name:            "multitenancy_metrics_with_missing_tenant_case",
+			md:              &notenantBatch,
+			multiTenancy:    true,
+			expectedTenants: []string{"default"},
+		},
+		{
+			name:            "multitenancy_metrics_with_multiple_tenant_and_missing_tenant_case",
+			md:              &multitenantWithMissingTenantLabel,
+			multiTenancy:    true,
+			expectedTenants: []string{tenantValue11, tenantValue22, "default"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if checkFunc != nil {
+					checkFunc(t, r, tt.multiTenancy, tt.expectedTenants)
+				}
+			}))
+
+			defer server.Close()
+
+			multiTenancyCfg := MultiTenancy{
+				Enabled: false,
+			}
+			if tt.multiTenancy {
+				multiTenancyCfg.Enabled = true
+				multiTenancyCfg.Header = "X-Scope-OrgId"
+				multiTenancyCfg.FromLabel = tenantLabel
+				multiTenancyCfg.DefaultTenant = "default"
+			}
+			cfg := &Config{
+				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				Namespace:        "",
+				HTTPClientSettings: confighttp.HTTPClientSettings{
+					Endpoint:        server.URL,
+					ReadBufferSize:  0,
+					WriteBufferSize: 512 * 1024,
+				},
+				RemoteWriteQueue: RemoteWriteQueue{NumConsumers: 5},
+				MultiTenancy:     multiTenancyCfg,
+			}
+			assert.NotNil(t, cfg)
+
+			buildInfo := component.BuildInfo{
+				Description: "OpenTelemetry Collector",
+				Version:     "1.0",
+			}
+			set := componenttest.NewNopExporterCreateSettings()
+			set.BuildInfo = buildInfo
+			prwe, nErr := newPRWExporter(cfg, set)
+			require.NoError(t, nErr)
+			require.NoError(t, prwe.Start(context.Background(), componenttest.NewNopHost()))
+			err := prwe.PushMetrics(context.Background(), *tt.md)
+			assert.NoError(t, err)
 		})
 	}
 }

@@ -1,9 +1,9 @@
 receivers:
     nop:
-  
+
 processors:
     nop:
- 
+
 exporters:
     prometheusremotewrite:
     prometheusremotewrite/2:
@@ -28,6 +28,12 @@ exporters:
         remote_write_queue:
             queue_size: 2000
             num_consumers: 10
+        multi_tenancy:
+            enabled: true
+            header: "X-Scope-OrgID"
+            query_param: "tenant"
+            from_label: "tenantLabel"
+            default_tenant: "fake"
 
 service:
     pipelines:
@@ -35,5 +41,5 @@ service:
             receivers: [nop]
             processors: [nop]
             exporters: [prometheusremotewrite]
-    
-    
+
+

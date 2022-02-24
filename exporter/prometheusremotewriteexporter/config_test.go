@@ -83,6 +83,13 @@ func Test_loadConfig(t *testing.T) {
 					"X-Scope-OrgID":                   "234"},
 			},
 			ResourceToTelemetrySettings: resourcetotelemetry.Settings{Enabled: true},
+			MultiTenancy: MultiTenancy{
+				Enabled:       true,
+				Header:        "X-Scope-OrgID",
+				QueryParam:    "tenant",
+				FromLabel:     "tenantLabel",
+				DefaultTenant: "fake",
+			},
 		})
 }
 
@@ -115,4 +122,24 @@ func TestDisabledQueue(t *testing.T) {
 	cfg, err := servicetest.LoadConfigAndValidate(filepath.Join("testdata", "disabled_queue.yaml"), factories)
 	assert.NoError(t, err)
 	assert.False(t, cfg.Exporters[config.NewComponentID(typeStr)].(*Config).RemoteWriteQueue.Enabled)
+}
+
+func TestMultiTenancyMissingHeaderAndQueryParameter(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	assert.NoError(t, err)
+
+	factory := NewFactory()
+	factories.Exporters[typeStr] = factory
+	_, err = servicetest.LoadConfigAndValidate(filepath.Join("testdata", "multitenancy_missing_header_query_param.yaml"), factories)
+	assert.Error(t, err)
+}
+
+func TestMultiTenancyMissingTenantLabel(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	assert.NoError(t, err)
+
+	factory := NewFactory()
+	factories.Exporters[typeStr] = factory
+	_, err = servicetest.LoadConfigAndValidate(filepath.Join("testdata", "multitenancy_missing_tenant_label.yaml"), factories)
+	assert.Error(t, err)
 }

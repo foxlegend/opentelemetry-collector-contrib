@@ -1,0 +1,21 @@
+receivers:
+    nop:
+
+processors:
+    nop:
+
+exporters:
+    prometheusremotewrite:
+        endpoint: "localhost:8888"
+        multi_tenancy:
+            enabled: true
+            from_label: tenantLabel
+
+service:
+    pipelines:
+        metrics:
+            receivers: [nop]
+            processors: [nop]
+            exporters: [prometheusremotewrite]
+
+

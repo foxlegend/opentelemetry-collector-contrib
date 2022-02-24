@@ -26,55 +26,101 @@ import (
 func Test_batchTimeSeries(t *testing.T) {
 	// First we will instantiate a dummy TimeSeries instance to pass into both the export call and compare the http request
 	labels := getPromLabels(label11, value11, label12, value12, label21, value21, label22, value22)
+
+	tenantLabels11 := getPromLabels(label11, value11, label12, value12, label21, value21, label22, value22, tenantLabel, tenantValue11)
+	tenantLabels22 := getPromLabels(label11, value11, label12, value12, label21, value21, label22, value22, tenantLabel, tenantValue22)
+
 	sample1 := getSample(floatVal1, msTime1)
 	sample2 := getSample(floatVal2, msTime2)
 	sample3 := getSample(floatVal3, msTime3)
 	ts1 := getTimeSeries(labels, sample1, sample2)
 	ts2 := getTimeSeries(labels, sample1, sample2, sample3)
 
+	tsTenant11 := getTimeSeries(tenantLabels11, sample1, sample2)
+	tsTenant22 := getTimeSeries(tenantLabels22, sample1, sample2, sample3)
+
 	tsMap1 := getTimeseriesMap([]*prompb.TimeSeries{})
 	tsMap2 := getTimeseriesMap([]*prompb.TimeSeries{ts1})
 	tsMap3 := getTimeseriesMap([]*prompb.TimeSeries{ts1, ts2})
+
+	tsMapTenant1 := getTimeseriesMap([]*prompb.TimeSeries{tsTenant11})
+	tsMapTenant2 := getTimeseriesMap([]*prompb.TimeSeries{tsTenant11, tsTenant22})
+	tsMapTenant3 := getTimeseriesMap([]*prompb.TimeSeries{tsTenant11, tsTenant22, ts1})
 
 	tests := []struct {
 		name                string
 		tsMap               map[string]*prompb.TimeSeries
 		maxBatchByteSize    int
-		numExpectedRequests int
+		numExpectedRequests map[string]int
+		multiTenancy        bool
 		returnErr           bool
 	}{
 		{
 			"no_timeseries",
 			tsMap1,
 			100,
-			-1,
+			map[string]int{noTenant: -1},
+			false,
 			true,
 		},
 		{
 			"normal_case",
 			tsMap2,
 			300,
-			1,
+			map[string]int{noTenant: 1},
+			false,
 			false,
 		},
 		{
 			"two_requests",
 			tsMap3,
 			300,
-			2,
+			map[string]int{noTenant: 2},
+			false,
+			false,
+		},
+		{
+			"one_tenant",
+			tsMapTenant1,
+			300,
+			map[string]int{tenantValue11: 1},
+			true,
+			false,
+		},
+		{
+			"two_tenants",
+			tsMapTenant2,
+			200,
+			map[string]int{tenantValue11: 1, tenantValue22: 2},
+			true,
+			false,
+		},
+		{
+			"missing_tenant_label",
+			tsMapTenant3,
+			200,
+			map[string]int{tenantValue11: 1, tenantValue22: 2, noTenant: 1},
+			true,
 			false,
 		},
 	}
 	// run tests
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			requests, err := batchTimeSeries(tt.tsMap, tt.maxBatchByteSize)
+			tenant := noTenant
+			if tt.multiTenancy {
+				tenant = tenantLabel
+			}
+			requests, err := batchTimeSeries(tt.tsMap, tt.maxBatchByteSize, tenant)
 			if tt.returnErr {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
-			assert.Equal(t, tt.numExpectedRequests, len(requests))
+
+			for tenantKey, _ := range tt.numExpectedRequests {
+				assert.Equal(t, tt.numExpectedRequests[tenantKey], len(requests[tenantKey]))
+			}
 		})
 	}
 }
