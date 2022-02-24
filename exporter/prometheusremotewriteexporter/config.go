@@ -123,9 +123,5 @@ func (cfg *Config) Validate() error {
 		return fmt.Errorf("one of multi_tenancy header or query_param should be set")
 	}
 
-	if cfg.MultiTenancy.Enabled && cfg.MultiTenancy.FromLabel == "" {
-		return fmt.Errorf("from_label should be set to find tenant name")
-	}
-
 	return nil
 }
