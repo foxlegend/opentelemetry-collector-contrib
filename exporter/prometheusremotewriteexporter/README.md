@@ -42,6 +42,12 @@ The following settings can be optionally configured:
   - `enabled`: enable the sending queue
   - `queue_size`: number of OTLP metrics that can be queued. Ignored if `enabled` is `false`
   - `num_consumers`: minimum number of workers to use to fan out the outgoing requests.
+- `multi_tenancy`: enable multi-tenancy support based on label value by setting the header accordingly
+  - `enabled`: enable multi-tenancy management
+  - `label_from`: the label which value should be used as tenant name (defaults to `tenant`)
+  - `header`: name of the header to set with tenant name
+  - `query_param`: name of the query parameter to set with tenant name
+  - `default_tenant`: tenant name to use when tenant label is missing (defaults to `default`)
 
 Example:
 
@@ -65,6 +71,8 @@ exporters:
       label_name1: label_value1
       label_name2: label_value2      
 ```
+
+
 
 ## Advanced Configuration
 
