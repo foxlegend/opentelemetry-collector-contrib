@@ -634,11 +634,11 @@ func Test_PushMetrics(t *testing.T) {
 					prwe, nErr := newPRWExporter(cfg, set)
 					require.NoError(t, nErr)
 					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
+					t.Cleanup(cancel)
 					require.NoError(t, prwe.Start(ctx, componenttest.NewNopHost()))
-					defer func() {
+					t.Cleanup(func() {
 						require.NoError(t, prwe.Shutdown(ctx))
-					}()
+					})
 					err := prwe.PushMetrics(ctx, *tt.metrics)
 					if tt.returnErr {
 						assert.Error(t, err)
@@ -676,7 +676,7 @@ func Test_exportWithMultiTenancy(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		md              *pdata.Metrics
+		md              *pmetric.Metrics
 		multiTenancy    bool
 		expectedTenants []string
 	}{
