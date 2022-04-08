@@ -50,11 +50,13 @@ type prwExporter struct {
 	wg              *sync.WaitGroup
 	closeChan       chan struct{}
 	concurrency     int
+	multiTenancy    MultiTenancy
 	userAgentHeader string
 	clientSettings  *confighttp.HTTPClientSettings
 	settings        component.TelemetrySettings
+	walCfg          *WALConfig
 
-	wal *prweWAL
+	wals map[string]*prweWAL
 }
 
 // newPRWExporter initializes a new prwExporter instance and sets fields accordingly.
@@ -82,15 +84,13 @@ func newPRWExporter(cfg *Config, set component.ExporterCreateSettings) (*prwExpo
 		multiTenancy:    cfg.MultiTenancy,
 		clientSettings:  &cfg.HTTPClientSettings,
 		settings:        set.TelemetrySettings,
+		walCfg:          cfg.WAL,
 	}
+
 	if cfg.WAL == nil {
 		return prwe, nil
 	}
 
-	prwe.wal, err = newWAL(cfg.WAL, prwe.export)
-	if err != nil {
-		return nil, err
-	}
 	return prwe, nil
 }
 
@@ -107,7 +107,13 @@ func (prwe *prwExporter) shutdownWALIfEnabled() error {
 	if !prwe.walEnabled() {
 		return nil
 	}
-	return prwe.wal.stop()
+	var errs error
+	for _, wal := range prwe.wals {
+		if err := wal.stop(); err != nil {
+			errs = multierr.Append(errs, err)
+		}
+	}
+	return errs
 }
 
 // Shutdown stops the exporter from accepting incoming calls(and return error), and wait for current export operations
@@ -182,36 +188,44 @@ func (prwe *prwExporter) handleExport(ctx context.Context, tsMap map[string]*pro
 	if err != nil {
 		return err
 	}
+
+	var errs error
 	if !prwe.walEnabled() {
-		// Perform a direct export otherwise.
-		return prwe.export(ctx, requests)
+		for tenant, tenantRequests := range requests {
+			// Perform a direct export otherwise.
+			err := prwe.export(ctx, tenantRequests, tenant)
+			if err != nil {
+				errs = multierr.Append(errs, err)
+			}
+		}
+		return errs
 	}
 
 	// Otherwise the WAL is enabled, and just persist the requests to the WAL
 	// and they'll be exported in another goroutine to the RemoteWrite endpoint.
-	if err = prwe.wal.persistToWAL(requests); err != nil {
-		return consumererror.NewPermanent(err)
+	for tenant, tenantRequests := range requests {
+		if _, ok := prwe.wals[tenant]; !ok {
+			prwe.wals[tenant], err = newWAL(prwe.walCfg, tenant, prwe.export)
+			if err != nil {
+				errs = multierr.Append(errs, err)
+			}
+		}
+		if err = prwe.wals[tenant].persistToWAL(tenantRequests); err != nil {
+			errs = multierr.Append(errs, err)
+		}
 	}
+	if errs != nil {
+		return consumererror.NewPermanent(errs)
+	}
+
 	return nil
 }
 
 // export sends a Snappy-compressed WriteRequest containing TimeSeries to a remote write endpoint in order
-func (prwe *prwExporter) export(ctx context.Context, requests map[string][]*prompb.WriteRequest) error {
-	chanLength := 0
-	for _, tenantRequests := range requests {
-		chanLength += len(tenantRequests)
-	}
-	input := make(chan struct {
-		string
-		*prompb.WriteRequest
-	}, chanLength)
-	for tenant, tenantRequests := range requests {
-		for _, request := range tenantRequests {
-			input <- struct {
-				string
-				*prompb.WriteRequest
-			}{tenant, request}
-		}
+func (prwe *prwExporter) export(ctx context.Context, requests []*prompb.WriteRequest, tenant string) error {
+	input := make(chan *prompb.WriteRequest, len(requests))
+	for _, request := range requests {
+		input <- request
 	}
 	close(input)
 
@@ -236,7 +250,7 @@ func (prwe *prwExporter) export(ctx context.Context, requests map[string][]*prom
 					if !ok {
 						return
 					}
-					if errExecute := prwe.execute(ctx, request.string, request.WriteRequest); errExecute != nil {
+					if errExecute := prwe.execute(ctx, tenant, request); errExecute != nil {
 						mu.Lock()
 						errs = multierr.Append(errs, consumererror.NewPermanent(errExecute))
 						mu.Unlock()
@@ -306,9 +320,10 @@ func (prwe *prwExporter) execute(ctx context.Context, tenant string, writeReq *p
 	return consumererror.NewPermanent(rerr)
 }
 
-func (prwe *prwExporter) walEnabled() bool { return prwe.wal != nil }
+func (prwe *prwExporter) walEnabled() bool { return prwe.walCfg != nil }
 
 func (prwe *prwExporter) turnOnWALIfEnabled(ctx context.Context) error {
+	var errs error
 	if !prwe.walEnabled() {
 		return nil
 	}
@@ -317,5 +332,14 @@ func (prwe *prwExporter) turnOnWALIfEnabled(ctx context.Context) error {
 		<-prwe.closeChan
 		cancel()
 	}()
-	return prwe.wal.run(cancelCtx)
+	for _, wal := range prwe.wals {
+		err := wal.run(cancelCtx)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+		}
+	}
+	if errs != nil {
+		return errs
+	}
+	return nil
 }
