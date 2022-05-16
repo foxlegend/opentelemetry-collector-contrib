@@ -26,21 +26,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func doNothingExportSink(_ context.Context, reqL []*prompb.WriteRequest) error {
+func doNothingExportSink(_ context.Context, reqL []*prompb.WriteRequest, tenant string) error {
 	_ = reqL
 	return nil
 }
 
 func TestWALCreation_nilConfig(t *testing.T) {
 	config := (*WALConfig)(nil)
-	pwal, err := newWAL(config, doNothingExportSink)
+	pwal, err := newWAL(config, noTenant, doNothingExportSink)
 	require.Equal(t, err, errNilConfig)
 	require.Nil(t, pwal)
 }
 
 func TestWALCreation_nonNilConfig(t *testing.T) {
 	config := &WALConfig{Directory: t.TempDir()}
-	pwal, err := newWAL(config, doNothingExportSink)
+	pwal, err := newWAL(config, noTenant, doNothingExportSink)
 	require.NotNil(t, pwal)
 	assert.Nil(t, err)
 	pwal.stop()
@@ -92,7 +92,7 @@ func TestWALStopManyTimes(t *testing.T) {
 		TruncateFrequency: 60 * time.Microsecond,
 		BufferSize:        1,
 	}
-	pwal, err := newWAL(config, doNothingExportSink)
+	pwal, err := newWAL(config, noTenant, doNothingExportSink)
 	require.Nil(t, err)
 	require.NotNil(t, pwal)
 
@@ -111,7 +111,7 @@ func TestWAL_persist(t *testing.T) {
 	// Unit tests that requests written to the WAL persist.
 	config := &WALConfig{Directory: t.TempDir()}
 
-	pwal, err := newWAL(config, doNothingExportSink)
+	pwal, err := newWAL(config, noTenant, doNothingExportSink)
 	require.Nil(t, err)
 
 	// 1. Write out all the entries.
