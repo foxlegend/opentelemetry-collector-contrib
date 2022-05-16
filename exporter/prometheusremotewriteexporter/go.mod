@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter
+module github.com/foxlegend/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter
 
 go 1.17
 
