@@ -559,7 +559,7 @@ func transformMetric(metric pmetric.Metric, transform internalTransform) bool {
 			scaleValueOp(metric, op, transform.MetricIncludeFilter)
 		case AddLabel:
 			if canChangeMetric {
-				addLabelOp(metric, op)
+				addLabelOp(metric, op, transform.MetricIncludeFilter)
 			}
 		case DeleteLabelValue:
 			if canChangeMetric {
