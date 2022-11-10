@@ -37,7 +37,9 @@ type prweWAL struct {
 	walConfig *WALConfig
 	walPath   string
 
-	exportSink func(ctx context.Context, reqL []*prompb.WriteRequest) error
+	tenant string
+
+	exportSink func(ctx context.Context, reqL []*prompb.WriteRequest, tenant string) error
 
 	stopOnce  sync.Once
 	stopChan  chan struct{}
@@ -70,7 +72,7 @@ func (wc *WALConfig) truncateFrequency() time.Duration {
 	return defaultWALTruncateFrequency
 }
 
-func newWAL(walConfig *WALConfig, exportSink func(context.Context, []*prompb.WriteRequest) error) (*prweWAL, error) {
+func newWAL(walConfig *WALConfig, tenant string, exportSink func(context.Context, []*prompb.WriteRequest, string) error) (*prweWAL, error) {
 	if walConfig == nil {
 		// There are cases for which the WAL can be disabled.
 		// TODO: Perhaps log that the WAL wasn't enabled.
@@ -80,14 +82,19 @@ func newWAL(walConfig *WALConfig, exportSink func(context.Context, []*prompb.Wri
 	return &prweWAL{
 		exportSink: exportSink,
 		walConfig:  walConfig,
+		tenant:     tenant,
 		stopChan:   make(chan struct{}),
 		rWALIndex:  atomic.NewUint64(0),
 		wWALIndex:  atomic.NewUint64(0),
 	}, nil
 }
 
-func (wc *WALConfig) createWAL() (*wal.Log, string, error) {
-	walPath := filepath.Join(wc.Directory, "prom_remotewrite")
+func (wc *WALConfig) createWAL(tenant string) (*wal.Log, string, error) {
+	walFileName := "prom_remotewrite"
+	if tenant != noTenant {
+		walFileName += "_" + tenant
+	}
+	walPath := filepath.Join(wc.Directory, walFileName)
 	log, err := wal.Open(walPath, &wal.Options{
 		SegmentCacheSize: wc.bufferSize(),
 		NoCopy:           true,
@@ -114,7 +121,7 @@ func (prwe *prweWAL) retrieveWALIndices() (err error) {
 		return err
 	}
 
-	log, walPath, err := prwe.walConfig.createWAL()
+	log, walPath, err := prwe.walConfig.createWAL(prwe.tenant)
 	if err != nil {
 		return err
 	}
@@ -203,7 +210,7 @@ func (prwe *prweWAL) continuallyPopWALThenExport(ctx context.Context, signalStar
 	defer func() {
 		// Keeping it within a closure to ensure that the later
 		// updated value of reqL is always flushed to disk.
-		if errL := prwe.exportSink(ctx, reqL); errL != nil {
+		if errL := prwe.exportSink(ctx, reqL, prwe.tenant); errL != nil {
 			err = multierr.Append(err, errL)
 		}
 	}()
@@ -299,7 +306,7 @@ func (prwe *prweWAL) exportThenFrontTruncateWAL(ctx context.Context, reqL []*pro
 		return nil
 	}
 
-	if errL := prwe.exportSink(ctx, reqL); errL != nil {
+	if errL := prwe.exportSink(ctx, reqL, prwe.tenant); errL != nil {
 		return errL
 	}
 	if err := prwe.syncAndTruncateFront(); err != nil {

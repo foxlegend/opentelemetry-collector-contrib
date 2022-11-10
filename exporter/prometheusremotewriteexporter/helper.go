@@ -21,37 +21,63 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
+const (
+	noTenant = "\xff"
+)
+
 // batchTimeSeries splits series into multiple batch write requests.
-func batchTimeSeries(tsMap map[string]*prompb.TimeSeries, maxBatchByteSize int) ([]*prompb.WriteRequest, error) {
+func batchTimeSeries(tsMap map[string]*prompb.TimeSeries, maxBatchByteSize int, tenantKey string) (map[string][]*prompb.WriteRequest, error) {
 	if len(tsMap) == 0 {
 		return nil, errors.New("invalid tsMap: cannot be empty map")
 	}
 
-	var requests []*prompb.WriteRequest
-	var tsArray []prompb.TimeSeries
-	sizeOfCurrentBatch := 0
+	var requests = make(map[string][]*prompb.WriteRequest)
+	var tsArray = make(map[string][]prompb.TimeSeries)
+	var sizeOfCurrentBatch = make(map[string]int)
 
 	for _, v := range tsMap {
 		sizeOfSeries := v.Size()
 
-		if sizeOfCurrentBatch+sizeOfSeries >= maxBatchByteSize {
-			wrapped := convertTimeseriesToRequest(tsArray)
-			requests = append(requests, wrapped)
+		tenant := tenantFromLabels(v.GetLabels(), tenantKey)
 
-			tsArray = nil
-			sizeOfCurrentBatch = 0
+		tenantSizeOfCurrentBatch, ok := sizeOfCurrentBatch[tenant]
+		if !ok {
+			tenantSizeOfCurrentBatch = 0
 		}
 
-		tsArray = append(tsArray, *v)
-		sizeOfCurrentBatch += sizeOfSeries
+		if tenantSizeOfCurrentBatch+sizeOfSeries >= maxBatchByteSize {
+			wrapped := convertTimeseriesToRequest(tsArray[tenant])
+			requests[tenant] = append(requests[tenant], wrapped)
+
+			tsArray[tenant] = make([]prompb.TimeSeries, 0)
+			tenantSizeOfCurrentBatch = 0
+		}
+
+		tsArray[tenant] = append(tsArray[tenant], *v)
+		sizeOfCurrentBatch[tenant] = tenantSizeOfCurrentBatch + sizeOfSeries
 	}
 
-	if len(tsArray) != 0 {
-		wrapped := convertTimeseriesToRequest(tsArray)
-		requests = append(requests, wrapped)
+	for tenant, v := range tsArray {
+		if len(v) != 0 {
+			wrapped := convertTimeseriesToRequest(v)
+			requests[tenant] = append(requests[tenant], wrapped)
+		}
 	}
 
 	return requests, nil
+}
+
+// tenantFromLabels extracts tenant name from labels.
+func tenantFromLabels(labels []prompb.Label, tenantKey string) string {
+	if tenantKey == "" || tenantKey == noTenant {
+		return noTenant
+	}
+	for _, label := range labels {
+		if label.Name == tenantKey {
+			return label.Value
+		}
+	}
+	return noTenant
 }
 
 func convertTimeseriesToRequest(tsArray []prompb.TimeSeries) *prompb.WriteRequest {

@@ -37,6 +37,10 @@ type Config struct {
 	// that handle outgoing requests.
 	RemoteWriteQueue RemoteWriteQueue `mapstructure:"remote_write_queue"`
 
+	// MultiTenancy allows user to enable multi-tenancy support
+	// from the exporter by setting http header or query param
+	MultiTenancy MultiTenancy `mapstructure:"multi_tenancy"`
+
 	// ExternalLabels defines a map of label keys and values that are allowed to start with reserved prefix "__"
 	ExternalLabels map[string]string `mapstructure:"external_labels"`
 
@@ -80,6 +84,26 @@ type RemoteWriteQueue struct {
 	NumConsumers int `mapstructure:"num_consumers"`
 }
 
+// MultiTenancy allows to configure multitenancy support.
+type MultiTenancy struct {
+	// Enabled if false multinenancy is not enabled.
+	Enabled bool `mapstructure:"enabled"`
+
+	// Header is the header name to set when sending metrics
+	// to the backend.
+	Header string `mapstructure:"header"`
+
+	// QueryParam is the query parameter to set when sending metrics
+	// to the backend.
+	QueryParam string `mapstructure:"query_param"`
+
+	// FromLabel uses this label value as tenant name.
+	FromLabel string `mapstructure:"from_label"`
+
+	// DefaultTenant is the default tenant name.
+	DefaultTenant string `mapstructure:"default_tenant"`
+}
+
 // TODO(jbd): Add capacity, max_samples_per_send to QueueConfig.
 
 var _ component.Config = (*Config)(nil)
@@ -96,6 +120,10 @@ func (cfg *Config) Validate() error {
 
 	if cfg.RemoteWriteQueue.NumConsumers < 0 {
 		return fmt.Errorf("remote write consumer number can't be negative")
+	}
+
+	if cfg.MultiTenancy.Enabled && cfg.MultiTenancy.Header == "" && cfg.MultiTenancy.QueryParam == "" {
+		return fmt.Errorf("one of multi_tenancy header or query_param should be set")
 	}
 
 	if cfg.TargetInfo == nil {

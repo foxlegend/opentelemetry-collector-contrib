@@ -111,6 +111,13 @@ func createDefaultConfig() component.Config {
 			QueueSize:    10000,
 			NumConsumers: 5,
 		},
+		MultiTenancy: MultiTenancy{
+			Enabled:       false,
+			Header:        "",
+			QueryParam:    "",
+			FromLabel:     "tenant",
+			DefaultTenant: "default",
+		},
 		TargetInfo: &TargetInfo{
 			Enabled: true,
 		},

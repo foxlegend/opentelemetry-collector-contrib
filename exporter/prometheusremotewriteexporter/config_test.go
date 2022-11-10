@@ -15,6 +15,8 @@
 package prometheusremotewriteexporter
 
 import (
+	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/service/servicetest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -82,6 +84,13 @@ func TestLoadConfig(t *testing.T) {
 						"X-Scope-OrgID":                   "234"},
 				},
 				ResourceToTelemetrySettings: resourcetotelemetry.Settings{Enabled: true},
+				MultiTenancy: MultiTenancy{
+					Enabled:       true,
+					Header:        "X-Scope-OrgID",
+					QueryParam:    "tenant",
+					FromLabel:     "tentantLabel",
+					DefaultTenant: "fake",
+				},
 				TargetInfo: &TargetInfo{
 					Enabled: true,
 				},
@@ -141,4 +150,24 @@ func TestDisabledTargetInfo(t *testing.T) {
 	require.NoError(t, component.UnmarshalConfig(sub, cfg))
 
 	assert.False(t, cfg.(*Config).TargetInfo.Enabled)
+}
+
+func TestMultiTenancyMissingHeaderAndQueryParameter(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	assert.NoError(t, err)
+
+	factory := NewFactory()
+	factories.Exporters[typeStr] = factory
+	_, err = servicetest.LoadConfigAndValidate(filepath.Join("testdata", "multitenancy_missing_header_query_param.yaml"), factories)
+	assert.Error(t, err)
+}
+
+func TestMultiTenancyMissingTenantLabel(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	assert.NoError(t, err)
+
+	factory := NewFactory()
+	factories.Exporters[typeStr] = factory
+	_, err = servicetest.LoadConfigAndValidate(filepath.Join("testdata", "multitenancy_missing_tenant_label.yaml"), factories)
+	assert.Error(t, err)
 }
