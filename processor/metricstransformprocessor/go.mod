@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricstransformprocessor
+module github.com/foxlegend/opentelemetry-collector-contrib/processor/metricstransformprocessor
 
 go 1.19
 
